@@ -10,3 +10,4 @@ copernicusmarine
 cdsapi
 argopy
 python-dotenv
+plotly
