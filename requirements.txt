@@ -1,0 +1,12 @@
+numpy
+pandas
+xarray
+netCDF4
+torch
+scikit-learn
+matplotlib
+streamlit
+copernicusmarine
+cdsapi
+argopy
+python-dotenv
