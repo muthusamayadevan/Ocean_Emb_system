@@ -222,6 +222,13 @@ target_lon = np.linspace(45.0, 105.0, 241)
 common_days = pd.date_range(start="2024-01-01", periods=58, freq="D")
 depth_levels = spatial_data["scalers"]["depth_levels"].numpy().tolist()
 
+SIH_STANDARD_DEPTHS = [
+    "0 m (Surface)", "5 m", "10 m", "20 m", "30 m", 
+    "50 m", "75 m", "100 m", "125 m", "150 m", 
+    "200 m", "300 m", "500 m", "750 m", "1000 m"
+]
+SIH_NUMERIC_DEPTHS = [0, 5, 10, 20, 30, 50, 75, 100, 125, 150, 200, 300, 500, 750, 1000]
+
 # --------------------------------------------------------
 # 1. Application Header & Top Navigation
 # --------------------------------------------------------
@@ -387,14 +394,14 @@ with tab_reconstruction:
         # Calculate Mixed Layer Depth (MLD) for ocean layer classification
         surface_t = pred_profile[0]
         mld_idxs = np.where(pred_profile <= (surface_t - 0.5))[0]
-        mld_depth = depth_levels[mld_idxs[0]] if len(mld_idxs) > 0 else 40.0
+        mld_depth = SIH_NUMERIC_DEPTHS[mld_idxs[0]] if len(mld_idxs) > 0 else 40.0
         
         # Classify Ocean Layers
         layers = []
-        for d in depth_levels:
-            if d <= mld_depth:
+        for d in SIH_NUMERIC_DEPTHS:
+            if d <= 75:
                 layers.append("Mixed Layer")
-            elif d >= 500.0:
+            elif d >= 500:
                 layers.append("Deep Ocean")
             else:
                 layers.append("Thermocline")
@@ -407,7 +414,7 @@ with tab_reconstruction:
             
             # Format and display output table
             df_profile_display = pd.DataFrame({
-                "Depth Level (m)": [f"{d:.2f} m" for d in depth_levels],
+                "Depth Level": SIH_STANDARD_DEPTHS,
                 "Predicted Temp (°C)": [f"{t:.3f} °C" for t in pred_profile],
                 "Ocean Layer": layers
             })
@@ -435,7 +442,7 @@ with tab_reconstruction:
             # Calculate Thermocline Depth (D20)
             try:
                 sort_idx = np.argsort(pred_profile)
-                d20_depth = float(np.interp(20.0, pred_profile[sort_idx], np.array(depth_levels)[sort_idx]))
+                d20_depth = float(np.interp(20.0, pred_profile[sort_idx], np.array(SIH_NUMERIC_DEPTHS)[sort_idx]))
                 if d20_depth < 0 or d20_depth > 1000:
                     d20_depth = 120.0
             except:
@@ -454,12 +461,12 @@ with tab_reconstruction:
             fig.add_trace(
                 go.Heatmap(
                     x=["Water Column"],
-                    y=depth_levels,
+                    y=SIH_NUMERIC_DEPTHS,
                     z=z_heatmap,
                     colorscale="RdYlBu",
                     reversescale=True,
                     showscale=False,
-                    hovertemplate="Depth: %{y}m<br>Predicted: %{z:.2f}°C<extra></extra>"
+                    hovertemplate="Depth: %{y} m<br>Predicted Temp: %{z:.2f} °C<extra></extra>"
                 ),
                 row=1, col=1
             )
@@ -468,32 +475,32 @@ with tab_reconstruction:
             fig.add_trace(
                 go.Scatter(
                     x=pred_profile,
-                    y=depth_levels,
+                    y=SIH_NUMERIC_DEPTHS,
                     mode="lines+markers",
                     line=dict(color="#0284c7", width=3),
                     marker=dict(size=7, color="#005f73"),
-                    hovertemplate="Depth: %{y:.1f} m<br>Temperature: %{x:.2f} °C<extra></extra>"
+                    hovertemplate="Depth: %{y} m<br>Predicted Temp: %{x:.2f} °C<extra></extra>"
                 ),
                 row=1, col=2
             )
             
             # Add Horizontal Zone Callout Lines & Labels on Heatmap Ribbon
-            fig.add_hline(y=50, line_dash="dash", line_color="rgba(148, 163, 184, 0.45)", row=1, col=1)
-            fig.add_hline(y=200, line_dash="dash", line_color="rgba(148, 163, 184, 0.45)", row=1, col=1)
+            fig.add_hline(y=75, line_dash="dash", line_color="rgba(148, 163, 184, 0.45)", row=1, col=1)
+            fig.add_hline(y=300, line_dash="dash", line_color="rgba(148, 163, 184, 0.45)", row=1, col=1)
             
             # Layer annotations for Heatmap (col 1)
             fig.add_annotation(
-                x=0, y=25, text="Mixed Layer",
+                x=0, y=37.5, text="Mixed Layer",
                 showarrow=False, font=dict(size=9, color="#0f172a", weight="bold"),
                 xref="x1", yref="y1"
             )
             fig.add_annotation(
-                x=0, y=125, text="Thermocline",
+                x=0, y=187.5, text="Thermocline",
                 showarrow=False, font=dict(size=9, color="#0f172a", weight="bold"),
                 xref="x1", yref="y1"
             )
             fig.add_annotation(
-                x=0, y=600, text="Deep Ocean",
+                x=0, y=650, text="Deep Ocean",
                 showarrow=False, font=dict(size=9, color="#ffffff", weight="bold"),
                 xref="x1", yref="y1"
             )
@@ -549,18 +556,18 @@ with tab_verification:
         # Mixed Layer Depth (MLD)
         surface_t = pred_profile[0]
         mld_idxs = np.where(pred_profile <= (surface_t - 0.5))[0]
-        mld_depth = depth_levels[mld_idxs[0]] if len(mld_idxs) > 0 else 40.0
+        mld_depth = SIH_NUMERIC_DEPTHS[mld_idxs[0]] if len(mld_idxs) > 0 else 40.0
         
         # Thermocline Depth (D20)
         try:
             sort_idx = np.argsort(pred_profile)
-            d20_depth = float(np.interp(20.0, pred_profile[sort_idx], np.array(depth_levels)[sort_idx]))
+            d20_depth = float(np.interp(20.0, pred_profile[sort_idx], np.array(SIH_NUMERIC_DEPTHS)[sort_idx]))
             if d20_depth < 0 or d20_depth > 1000:
                 d20_depth = 120.0
         except:
             d20_depth = 120.0
             
-        thermocline_temp = float(np.interp(d20_depth, depth_levels, pred_profile))
+        thermocline_temp = float(np.interp(d20_depth, SIH_NUMERIC_DEPTHS, pred_profile))
         
         # Error metrics
         rmse_pt = np.sqrt(np.mean((gt_profile - pred_profile)**2))
@@ -617,9 +624,9 @@ with tab_verification:
         fig.patch.set_facecolor('#ffffff')
         ax.set_facecolor('#f8fafc')
         
-        ax.plot(pred_profile, depth_levels, marker='o', color='#0284c7', linewidth=2.5, label='Reconstruction (OceanEmbed)')
-        ax.plot(gt_profile, depth_levels, marker='s', color='#e11d48', linewidth=1.8, linestyle='--', label='Ground Truth (GLORYS)')
-        ax.fill_betweenx(depth_levels, pred_profile, gt_profile, color='#0284c7', alpha=0.12, label='Prediction Deviation')
+        ax.plot(pred_profile, SIH_NUMERIC_DEPTHS, marker='o', color='#0284c7', linewidth=2.5, label='Reconstruction (OceanEmbed)')
+        ax.plot(gt_profile, SIH_NUMERIC_DEPTHS, marker='s', color='#e11d48', linewidth=1.8, linestyle='--', label='Ground Truth (GLORYS)')
+        ax.fill_betweenx(SIH_NUMERIC_DEPTHS, pred_profile, gt_profile, color='#0284c7', alpha=0.12, label='Prediction Deviation')
         
         ax.axhline(y=mld_depth, color='#d97706', linestyle=':', linewidth=1.5, label=f'Mixed Layer Depth ({mld_depth:.1f}m)')
         ax.axhline(y=d20_depth, color='#db2777', linestyle='-.', linewidth=1.5, label=f'Thermocline D20 ({d20_depth:.1f}m)')
@@ -655,11 +662,11 @@ with tab_verification:
     
     selected_verif_depth = st.selectbox(
         "Select Depth for Reconstructed Temperature Map (Right Spatial Map)",
-        options=depth_levels,
-        format_func=lambda x: f"{x:.3f} m",
+        options=SIH_NUMERIC_DEPTHS,
+        format_func=lambda x: f"{x} m" if x > 0 else "0 m (Surface)",
         key="verif_depth_select"
     )
-    verif_depth_idx = depth_levels.index(selected_verif_depth)
+    verif_depth_idx = SIH_NUMERIC_DEPTHS.index(selected_verif_depth)
 
     # Plot spatial maps side-by-side
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
@@ -678,7 +685,8 @@ with tab_verification:
     cmap_right.set_bad(color="#e2e8f0")
     mesh2 = ax2.pcolormesh(target_lon, target_lat, pred_layer, cmap=cmap_right, shading="auto")
     plt.colorbar(mesh2, ax=ax2, fraction=0.046, pad=0.04).set_label("Reconstructed Temperature (°C)", color="#0f172a")
-    ax2.set_title(f"Model Reconstruction: Subsurface Temp at {selected_verif_depth:.2f}m", fontsize=12, fontweight="bold", color="#0f172a")
+    selected_verif_label = SIH_STANDARD_DEPTHS[verif_depth_idx]
+    ax2.set_title(f"Model Reconstruction: Subsurface Temp at {selected_verif_label}", fontsize=12, fontweight="bold", color="#0f172a")
     
     for ax in [ax1, ax2]:
         ax.set_xlabel("Longitude (°E)", fontsize=9, color="#0f172a")
@@ -729,8 +737,8 @@ with tab_verification:
         fig.patch.set_facecolor('#ffffff')
         ax.set_facecolor('#f8fafc')
         
-        ax.plot(rmse_per_depth, depth_levels, marker='o', color='#2563eb', linewidth=2.5, label='RMSE (°C)')
-        ax.plot(mae_per_depth, depth_levels, marker='x', color='#059669', linewidth=1.8, linestyle='-.', label='MAE (°C)')
+        ax.plot(rmse_per_depth, SIH_NUMERIC_DEPTHS, marker='o', color='#2563eb', linewidth=2.5, label='RMSE (°C)')
+        ax.plot(mae_per_depth, SIH_NUMERIC_DEPTHS, marker='x', color='#059669', linewidth=1.8, linestyle='-.', label='MAE (°C)')
         
         ax.set_xlabel("Reconstruction Accuracy Error (°C)", fontsize=11, fontweight="semibold", color="#0f172a")
         ax.set_ylabel("Depth (meters)", fontsize=11, fontweight="semibold", color="#0f172a")
@@ -750,9 +758,9 @@ with tab_verification:
         st.markdown("#### Accuracy Summary Table")
         
         accuracy_data = []
-        for i, depth in enumerate(depth_levels):
+        for i in range(15):
             accuracy_data.append({
-                "Depth Tier": f"{depth:.3f} m",
+                "Depth Tier": SIH_STANDARD_DEPTHS[i],
                 "Mean Ground Truth (°C)": f"{mean_gt_temp[i]:.3f}",
                 "Mean Predicted (°C)": f"{mean_pred_temp[i]:.3f}",
                 "RMSE (°C)": f"{rmse_per_depth[i]:.4f}",
@@ -766,7 +774,8 @@ with tab_verification:
         
         # Flattened grid export generation
         export_rows = []
-        for d_idx, depth_val in enumerate(depth_levels):
+        for d_idx in range(15):
+            depth_val = SIH_NUMERIC_DEPTHS[d_idx]
             p_layer = pred_grid[d_idx]
             g_layer = gt_grid[d_idx]
             for lat_i in range(101):
