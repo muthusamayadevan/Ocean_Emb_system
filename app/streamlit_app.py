@@ -1,96 +1,179 @@
 """
-app/streamlit_app.py
+src/streamlit_app.py
 
-Enterprise-grade, publication-ready research dashboard for the OceanEmbed framework.
-Structured to provide direct depth-by-depth predicted temperature tables and vertical profiles 
-as the primary view, with verification, benchmarking, and spatial maps in a secondary tab.
-Upgraded to feature a dual Plotly subplot rendering a water column thermal ribbon and interactive curve.
-
-Running Standalone:
-streamlit run app/streamlit_app.py
+Official Copernicus Marine & INCOIS 3D Subsurface Telemetry Portal.
+Clean, white-themed portal featuring a 3D Earth Globe geospatial viewer (SST heatmap overlay),
+interactive 3D subsurface temperature volume cube, vertical stratification profiles, and Argo float benchmarks.
 """
 
 import os
+import time
 import copy
 import joblib
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import torch
 import streamlit as st
+import xarray as xr
 from scipy.interpolate import interp1d
-from plotly.subplots import make_subplots
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-# Import model definition from model.py
+# Import model definition
 from src.model import OceanEncoderDecoder
 
 
-# Page Configuration
+# --------------------------------------------------------
+# 1. Page Configuration & Custom CSS Injection (Copernicus Light Theme)
+# --------------------------------------------------------
 st.set_page_config(
-    page_title="OceanEmbed: Subsurface Temperature Reconstruction",
+    page_title="OceanEmbed | Copernicus Subsurface Portal",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Clean, Minimalist CSS Styling Injection (No Emojis)
+# Clean, professional light theme styling (Zero Emojis)
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     
-    /* Global Styles */
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
+    /* Body & App Background */
+    .stApp {
+        background-color: #f8fafc !important;
+        color: #0f172a !important;
+        font-family: 'Inter', sans-serif !important;
     }
     
-    /* Clean Metric Badges */
-    .metric-badge {
-        display: inline-block;
-        background-color: rgba(148, 163, 184, 0.08);
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 4px;
-        padding: 6px 12px;
-        margin-right: 10px;
-        font-size: 12px;
-        font-weight: 500;
-        color: #475569;
+    /* Headers styling */
+    h1, h2, h3, h4, h5, h6 {
+        color: #0f172a !important;
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 700 !important;
+        margin-top: 0 !important;
     }
     
-    /* Custom Slate Container Cards */
-    .dashboard-card {
-        background-color: rgba(148, 163, 184, 0.04);
-        border: 1px solid rgba(148, 163, 184, 0.15);
-        border-radius: 6px;
-        padding: 18px;
-        margin-bottom: 18px;
+    /* Card headers in container */
+    h3 {
+        font-size: 14px !important;
+        font-weight: 700 !important;
+        color: #0f172a !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.5px !important;
+        border-bottom: 1px solid #f1f5f9 !important;
+        padding-bottom: 10px !important;
+        margin-bottom: 15px !important;
     }
     
-    .card-title {
-        font-size: 11px;
-        text-transform: uppercase;
-        font-weight: 600;
-        letter-spacing: 0.5px;
-        color: #64748b;
-        margin-bottom: 6px;
+    /* Style native st.container with border to act as portal cards */
+    div[data-testid="stContainer"] {
+        background-color: #ffffff !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 8px !important;
+        padding: 20px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        margin-bottom: 20px !important;
     }
     
-    .card-value {
-        font-size: 26px;
-        font-weight: 700;
-        color: #0f172a;
+    /* Metadata pill badges */
+    .metadata-pill {
+        display: inline-flex;
+        background-color: #f1f5f9 !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 9999px !important;
+        padding: 4px 14px !important;
+        margin-right: 8px !important;
+        margin-bottom: 8px !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        color: #1e293b !important;
     }
     
-    /* Dark Mode Compatibility adjustments for cards */
-    @media (prefers-color-scheme: dark) {
-        .card-value {
-            color: #f8fafc;
-        }
-        .metric-badge {
-            color: #cbd5e1;
-            background-color: rgba(203, 213, 225, 0.08);
-            border: 1px solid rgba(203, 213, 225, 0.2);
-        }
+    /* Subtitle styling */
+    .portal-subtitle {
+        font-size: 13px !important;
+        color: #475569 !important;
+        margin-bottom: 20px !important;
+    }
+    
+    /* Dynamic pill metrics */
+    .metric-pill-card {
+        background-color: #f8fafc !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 6px !important;
+        padding: 10px 14px !important;
+        text-align: center !important;
+    }
+    
+    .metric-pill-title {
+        font-size: 10px !important;
+        text-transform: uppercase !important;
+        font-weight: 600 !important;
+        color: #475569 !important;
+        margin-bottom: 4px !important;
+    }
+    
+    .metric-pill-value {
+        font-size: 18px !important;
+        font-weight: 700 !important;
+        color: #0369a1 !important;
+    }
+    
+    /* Primary action CTA button */
+    div.stButton > button {
+        background-color: #0369a1 !important;
+        border: 1px solid #0369a1 !important;
+        color: #ffffff !important;
+        border-radius: 6px !important;
+        padding: 10px 24px !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease !important;
+        width: 100% !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+    }
+    
+    div.stButton > button:hover {
+        background-color: #0284c7 !important;
+        border-color: #0284c7 !important;
+        color: #ffffff !important;
+        transform: translateY(-1px) !important;
+    }
+    
+    /* Tab selector overrides */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #e2e8f0 !important;
+        border-radius: 8px !important;
+        padding: 4px !important;
+        border: 1px solid #cbd5e1 !important;
+        gap: 6px !important;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        color: #475569 !important;
+        font-weight: 500 !important;
+        padding: 8px 16px !important;
+        border-radius: 6px !important;
+        background-color: transparent !important;
+        border: none !important;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        font-weight: 700 !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+    }
+    
+    /* Number input and dropdown form overrides */
+    .stNumberInput input, .stSelectbox select {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid #cbd5e1 !important;
+    }
+    
+    /* Horizontal ruler */
+    hr {
+        border-color: #e2e8f0 !important;
     }
     </style>
     """,
@@ -98,6 +181,9 @@ st.markdown(
 )
 
 
+# --------------------------------------------------------
+# 2. Resource Loading & Vectorized Grid Inference
+# --------------------------------------------------------
 @st.cache_resource
 def load_all_resources():
     """
@@ -213,190 +299,154 @@ def run_grid_inference(day_idx, _model, _input_scaler, _output_scaler, _spatial_
     return pred_grid
 
 
-# --- Initialize Resources ---
+# --- Initialize resources ---
 model, input_scaler, output_scaler, spatial_data = load_all_resources()
 
-# Extract coordinates and lists
+# Extract coordinates and standard shapes
 target_lat = np.linspace(5.0, 30.0, 101)
 target_lon = np.linspace(45.0, 105.0, 241)
 common_days = pd.date_range(start="2024-01-01", periods=58, freq="D")
 depth_levels = spatial_data["scalers"]["depth_levels"].numpy().tolist()
 
 SIH_STANDARD_DEPTHS = [
-    "0 m (Surface)", "5 m", "10 m", "20 m", "30 m", 
-    "50 m", "75 m", "100 m", "125 m", "150 m", 
-    "200 m", "300 m", "500 m", "750 m", "1000 m"
+    '0 m (Surface)', '5 m', '10 m', '20 m', '30 m', '50 m', '75 m', 
+    '100 m', '125 m', '150 m', '200 m', '300 m', '500 m', '750 m', '1000 m'
 ]
 SIH_NUMERIC_DEPTHS = [0, 5, 10, 20, 30, 50, 75, 100, 125, 150, 200, 300, 500, 750, 1000]
 
-# --------------------------------------------------------
-# 1. Application Header & Top Navigation
-# --------------------------------------------------------
-st.markdown("## OceanEmbed: Satellite-Driven 3D Subsurface Ocean Temperature Reconstruction")
-st.markdown(
-    "<p style='color: #64748b; font-size: 14px; margin-top: -10px;'>"
-    "North Indian Ocean Domain (5°N–30°N, 45°E–105°E) | 0.25° Spatial Resolution | 15 Standard Depths (0–1000m)"
-    "</p>",
-    unsafe_allow_html=True
-)
 
-# Text Badges for System Status
+# --------------------------------------------------------
+# 3. Helper Metric Calculations
+# --------------------------------------------------------
+def calculate_mld(depths, temps, threshold=0.5):
+    """
+    Interpolates Mixed Layer Depth where temperature drops by threshold degrees relative to SST.
+    """
+    t0 = temps[0]
+    target_t = t0 - threshold
+    if temps[-1] > target_t:
+        return float(depths[-1])
+    for i in range(1, len(temps)):
+        if temps[i] <= target_t:
+            t_prev, t_curr = temps[i-1], temps[i]
+            d_prev, d_curr = depths[i-1], depths[i]
+            fraction = (target_t - t_prev) / (t_curr - t_prev)
+            return float(d_prev + fraction * (d_curr - d_prev))
+    return 45.0
+
+
+def calculate_d20(depths, temps):
+    """
+    Interpolates depth of the 20°C Isotherm.
+    """
+    if temps[0] < 20.0:
+        return 0.0
+    if temps[-1] > 20.0:
+        return float(depths[-1])
+    for i in range(1, len(temps)):
+        if temps[i] <= 20.0:
+            t_prev, t_curr = temps[i-1], temps[i]
+            d_prev, d_curr = depths[i-1], depths[i]
+            fraction = (20.0 - t_prev) / (t_curr - t_prev)
+            return float(d_prev + fraction * (d_curr - d_prev))
+    return 134.3
+
+
+# --------------------------------------------------------
+# 4. Top Government Header & Status Bar
+# --------------------------------------------------------
+st.markdown("## OceanEmbed: 3D Subsurface Ocean Temperature Reconstruction")
+st.markdown("<p class='portal-subtitle'>Copernicus / INCOIS Physical Intelligence Portal | Domain: 5°N–30°N, 45°E–105°E</p>", unsafe_allow_html=True)
+
+# Metadata badges
 st.markdown(
-    f"""
-    <div>
-        <span class="metric-badge">Model Status: OceanUNet Architecture Active</span>
-        <span class="metric-badge">Temporal Bounds: 2024-01-01 to 2024-02-27</span>
-        <span class="metric-badge">Reconstruction Domain: Aligned 0.25 Grid</span>
+    """
+    <div style="margin-bottom: 25px;">
+        <span class="metadata-pill">Model Engine: OceanUNet (Active)</span>
+        <span class="metadata-pill">Spatial Resolution: 0.25° Aligned Grid</span>
+        <span class="metadata-pill">Temporal Resolution: Daily</span>
+        <span class="metadata-pill">Vertical Coverage: 15 Standard Physical Depth Tiers (0–1000m)</span>
     </div>
-    <br>
     """,
     unsafe_allow_html=True
 )
 
-# --------------------------------------------------------
-# 2. Input Selectors (Top Section)
-# --------------------------------------------------------
-st.markdown("### Reconstruction Slicer Settings")
-col_date, col_lat, col_lon = st.columns(3)
-
-with col_date:
-    date_strs = [d.strftime("%Y-%m-%d") for d in common_days]
-    selected_date_str = st.selectbox(
-        "Analysis Snapshot Date",
-        options=date_strs,
-        index=0
-    )
-    day_idx = date_strs.index(selected_date_str)
-
-with col_lat:
-    selected_lat = st.number_input(
-        "Latitude (5.0°N to 30.0°N)",
-        min_value=5.0,
-        max_value=30.0,
-        value=15.0,
-        step=0.25
-    )
-
-with col_lon:
-    selected_lon = st.number_input(
-        "Longitude (45.0°E to 105.0°E)",
-        min_value=45.0,
-        max_value=105.0,
-        value=85.0,
-        step=0.25
-    )
-
-# Prominent Action Button
-reconstruct_triggered = st.button(
-    "Reconstruct Subsurface Temperature", 
-    type="primary", 
-    use_container_width=True
-)
-
-# Manage state for reconstruct button
-if reconstruct_triggered or 'calculated' not in st.session_state:
-    st.session_state.calculated = True
 
 # --------------------------------------------------------
-# Grid Data Calculations
+# 5. Clean Single-Row Input Control Deck
 # --------------------------------------------------------
-X_surface_norm = spatial_data["X_surface"][day_idx].numpy()
-surface_means = spatial_data["scalers"]["surface_means"].numpy()
-surface_stds = spatial_data["scalers"]["surface_stds"].numpy()
-ocean_mask = spatial_data["ocean_mask"].numpy()
+with st.container(border=True):
+    col_deck1, col_deck2, col_deck3, col_deck4 = st.columns([30, 25, 25, 20])
 
-# Denormalize variables
-sst_grid = X_surface_norm[0] * surface_stds[0] + surface_means[0]
-if np.nanmean(sst_grid) > 200:
-    sst_grid = sst_grid - 273.15
-    
-sss_grid = X_surface_norm[1] * surface_stds[1] + surface_means[1]
-ssh_grid = X_surface_norm[2] * surface_stds[2] + surface_means[2]
-curr_u = X_surface_norm[3] * surface_stds[3] + surface_means[3]
-curr_v = X_surface_norm[4] * surface_stds[4] + surface_means[4]
-wind_u = X_surface_norm[5] * surface_stds[5] + surface_means[5]
-wind_v = X_surface_norm[6] * surface_stds[6] + surface_means[6]
+    with col_deck1:
+        date_strs = [d.strftime("%Y-%m-%d") for d in common_days]
+        selected_date_str = st.selectbox(
+            "Analysis Snapshot Date",
+            options=date_strs,
+            index=0
+        )
+        day_idx = date_strs.index(selected_date_str)
 
-current_speed = np.sqrt(curr_u**2 + curr_v**2)
-wind_speed = np.sqrt(wind_u**2 + wind_v**2)
+    with col_deck2:
+        selected_lat = st.number_input(
+            "Target Latitude (5.00°N to 30.00°N)",
+            min_value=5.0,
+            max_value=30.0,
+            value=15.0,
+            step=0.25
+        )
 
-# Mask land cells with NaN for maps plotting
-for grid in [sst_grid, sss_grid, ssh_grid, current_speed, wind_speed]:
-    grid[ocean_mask == 0] = np.nan
+    with col_deck3:
+        selected_lon = st.number_input(
+            "Target Longitude (45.00°E to 105.00°E)",
+            min_value=45.0,
+            max_value=105.0,
+            value=85.0,
+            step=0.25
+        )
 
-# Perform grid-wise model inference
-pred_grid = run_grid_inference(day_idx, model, input_scaler, output_scaler, spatial_data, target_lat, target_lon)
+    with col_deck4:
+        st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+        reconstruct_clicked = st.button("Reconstruct Subsurface Field", key="cta_reconstruct")
 
-# Get ground truth 3D subsurface temperature
-subsurface_means = spatial_data["scalers"]["subsurface_means"].numpy()
-subsurface_stds = spatial_data["scalers"]["subsurface_stds"].numpy()
-gt_grid = np.zeros_like(pred_grid)
-for d in range(15):
-    gt_grid[d] = spatial_data["Y_subsurface"][day_idx, d].numpy() * subsurface_stds[d] + subsurface_means[d]
-    gt_grid[d][ocean_mask == 0] = np.nan
 
-# Find closest grid indices for selected Lat/Lon
+# --------------------------------------------------------
+# 6. Grid Data Retrieval & Model Predictions
+# --------------------------------------------------------
 lat_idx = np.abs(target_lat - selected_lat).argmin()
 lon_idx = np.abs(target_lon - selected_lon).argmin()
 
-actual_lat_val = target_lat[lat_idx]
-actual_lon_val = target_lon[lon_idx]
+# Run full domain inference for selected day index
+pred_grid = run_grid_inference(day_idx, model, input_scaler, output_scaler, spatial_data, target_lat, target_lon)
+
+# Verify coordinate ocean/land status
+ocean_mask = spatial_data["ocean_mask"].numpy()
+is_land = (ocean_mask[lat_idx, lon_idx] == 0)
+
+if reconstruct_clicked:
+    st.info(f"Subsurface reconstruction completed for coordinate {selected_lat}°N, {selected_lon}°E.")
 
 
 # --------------------------------------------------------
-# 3. Main Dashboard Panels (Tabs)
+# 7. Tab Layout Initialization (2 Tabs Only)
 # --------------------------------------------------------
-tab_reconstruction, tab_verification = st.tabs([
+tab_reconstruction, tab_validation = st.tabs([
     "Subsurface Temperature Profile",
-    "Validation and Spatial Maps"
+    "Model Benchmarks & Spatial 2D Maps"
 ])
 
-# --- Tab 1: Subsurface Temperature Profile (Primary View) ---
+
+# ========================================================
+# TAB 1: Subsurface Temperature Profile (Primary View)
+# ========================================================
 with tab_reconstruction:
-    if ocean_mask[lat_idx, lon_idx] == 0:
+    if is_land:
         st.warning(f"Selected coordinates ({selected_lat}°N, {selected_lon}°E) correspond to a land cell. Please select coordinate values over water.")
     else:
-        # Extract predictions for the specific point
-        raw_pt_inputs = np.array([
-            sst_grid[lat_idx, lon_idx],
-            sss_grid[lat_idx, lon_idx],
-            ssh_grid[lat_idx, lon_idx],
-            curr_u[lat_idx, lon_idx],
-            curr_v[lat_idx, lon_idx],
-            wind_u[lat_idx, lon_idx],
-            wind_v[lat_idx, lon_idx]
-        ])
+        # Extract predicted temperature profile for coordinate
+        pred_profile = pred_grid[:, lat_idx, lon_idx].tolist()
         
-        doy = common_days[day_idx].dayofyear
-        pt_input = np.array([[
-            actual_lat_val,
-            actual_lon_val,
-            doy,
-            raw_pt_inputs[0],
-            raw_pt_inputs[1],
-            raw_pt_inputs[2],
-            raw_pt_inputs[3],
-            raw_pt_inputs[4],
-            raw_pt_inputs[5],
-            raw_pt_inputs[6]
-        ]])
-        
-        # Scale and run model inference
-        pt_scaled = input_scaler.transform(pt_input)
-        with torch.no_grad():
-            pt_pred_scaled = model(torch.FloatTensor(pt_scaled)).numpy()
-        pred_profile_8 = output_scaler.inverse_transform(pt_pred_scaled).squeeze()
-        
-        # Interpolate predictions to standard 15 depths
-        model_depths = [0, 10, 30, 50, 75, 100, 200, 500]
-        pred_profile = np.interp(depth_levels, model_depths, pred_profile_8)
-        
-        # Calculate Mixed Layer Depth (MLD) for ocean layer classification
-        surface_t = pred_profile[0]
-        mld_idxs = np.where(pred_profile <= (surface_t - 0.5))[0]
-        mld_depth = SIH_NUMERIC_DEPTHS[mld_idxs[0]] if len(mld_idxs) > 0 else 40.0
-        
-        # Classify Ocean Layers
+        # Categorize depth layers
         layers = []
         for d in SIH_NUMERIC_DEPTHS:
             if d <= 75:
@@ -405,396 +455,474 @@ with tab_reconstruction:
                 layers.append("Deep Ocean")
             else:
                 layers.append("Thermocline")
-
-        # Two Column Layout (35% Left, 65% Right)
-        col_table, col_profile = st.columns([35, 65])
+                
+        # Subplot calculation: interpolate D20 and calculate MLD
+        d20_val = calculate_d20(SIH_NUMERIC_DEPTHS, pred_profile)
+        mld_val = calculate_mld(SIH_NUMERIC_DEPTHS, pred_profile, threshold=0.5)
         
-        with col_table:
-            st.markdown("#### Layer-by-Layer Predicted Temperature")
-            
-            # Format and display output table
-            df_profile_display = pd.DataFrame({
-                "Depth Level": SIH_STANDARD_DEPTHS,
-                "Predicted Temp (°C)": [f"{t:.3f} °C" for t in pred_profile],
-                "Ocean Layer": layers
-            })
-            
-            st.dataframe(
-                df_profile_display,
-                use_container_width=True,
-                hide_index=True,
-                height=560
-            )
-            
-            # Download Depth Profile CSV Button directly under table
-            csv_profile_data = df_profile_display.to_csv(index=False)
-            st.download_button(
-                label="Download Depth Profile (CSV)",
-                data=csv_profile_data,
-                file_name=f"oceanembed_profile_{selected_lat:.2f}N_{selected_lon:.2f}E_{selected_date_str}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-            
-        with col_profile:
-            st.markdown("#### Dual Subsurface Analysis")
-            
-            # Calculate Thermocline Depth (D20)
-            try:
-                sort_idx = np.argsort(pred_profile)
-                d20_depth = float(np.interp(20.0, pred_profile[sort_idx], np.array(SIH_NUMERIC_DEPTHS)[sort_idx]))
-                if d20_depth < 0 or d20_depth > 1000:
-                    d20_depth = 120.0
-            except:
-                d20_depth = 120.0
-
-            # 1. Setup Combined Plotly Dual Subplot figure
-            fig = make_subplots(
-                rows=1, cols=2,
-                shared_yaxes=True,
-                column_widths=[0.25, 0.75],
-                horizontal_spacing=0.08
-            )
-            
-            # Left Subplot: Water Column Heatmap Ribbon
-            z_heatmap = [[t] for t in pred_profile]
-            fig.add_trace(
-                go.Heatmap(
-                    x=["Water Column"],
-                    y=SIH_NUMERIC_DEPTHS,
-                    z=z_heatmap,
-                    colorscale="RdYlBu",
-                    reversescale=True,
-                    showscale=False,
-                    hovertemplate="Depth: %{y} m<br>Predicted Temp: %{z:.2f} °C<extra></extra>"
-                ),
-                row=1, col=1
-            )
-            
-            # Right Subplot: Vertical Temperature Profile Curve
-            fig.add_trace(
-                go.Scatter(
+        # Denormalize SST for specific coordinate
+        surface_means = spatial_data["scalers"]["surface_means"].numpy()
+        surface_stds = spatial_data["scalers"]["surface_stds"].numpy()
+        sst_grid_raw = spatial_data["X_surface"][day_idx, 0].numpy() * surface_stds[0] + surface_means[0]
+        if np.nanmean(sst_grid_raw) > 200:
+            sst_grid_raw -= 273.15
+        
+        sst_at_pt = sst_grid_raw[lat_idx, lon_idx]
+        
+        # 50/50 Column Layout Split
+        col_globe, col_telemetry = st.columns([50, 50])
+        
+        with col_globe:
+            with st.container(border=True):
+                st.markdown("### Ocean Geospatial Viewer")
+                
+                # Viewer Mode Toggle
+                view_mode = st.radio(
+                    "Viewer Mode",
+                    options=["3D Earth Globe", "3D Volumetric Depth Cube"],
+                    horizontal=True,
+                    key="viewer_mode_toggle"
+                )
+                
+                if view_mode == "3D Earth Globe":
+                    # Downsample grid slightly for fluid WebGL interactive rotation
+                    ds_factor = 2
+                    ds_lat = target_lat[::ds_factor]
+                    ds_lon = target_lon[::ds_factor]
+                    ds_mask = ocean_mask[::ds_factor, ::ds_factor]
+                    ds_sst = sst_grid_raw[::ds_factor, ::ds_factor]
+                    
+                    lat_m, lon_m = np.meshgrid(ds_lat, ds_lon, indexing="ij")
+                    lats_f = lat_m.flatten()
+                    lons_f = lon_m.flatten()
+                    mask_f = ds_mask.flatten()
+                    sst_f = ds_sst.flatten()
+                    
+                    ocean_idx = np.where(mask_f == 1)[0]
+                    
+                    # Plotly 3D Orthographic Globe
+                    fig_globe = go.Figure()
+                    
+                    # Trace 1: Surface Temperature Heatmap Overlay
+                    fig_globe.add_trace(go.Scattergeo(
+                        lat=lats_f[ocean_idx],
+                        lon=lons_f[ocean_idx],
+                        mode="markers",
+                        marker=dict(
+                            size=4,
+                            color=sst_f[ocean_idx],
+                            colorscale="RdYlBu_r", # Classical ocean temp palette
+                            cmin=20.0,
+                            cmax=32.0,
+                            colorbar=dict(
+                                title="SST (°C)",
+                                thickness=12,
+                                len=0.5,
+                                y=0.5,
+                                x=0.9
+                            ),
+                            opacity=0.85
+                        ),
+                        hoverinfo="none"
+                    ))
+                    
+                    # Trace 2: Target Pin
+                    fig_globe.add_trace(go.Scattergeo(
+                        lat=[selected_lat],
+                        lon=[selected_lon],
+                        mode="markers",
+                        marker=dict(
+                            size=14,
+                            color="#ef4444", # Glowing target red pin
+                            symbol="diamond",
+                            line=dict(color="#ffffff", width=2)
+                        ),
+                        hovertext=f"Selected Station:<br>Lat: {selected_lat:.2f}°N<br>Lon: {selected_lon:.2f}°E<br>SST: {sst_at_pt:.3f} °C",
+                        hoverinfo="text"
+                    ))
+                    
+                    fig_globe.update_geos(
+                        projection_type="orthographic",
+                        projection_rotation=dict(
+                            lat=selected_lat,
+                            lon=selected_lon,
+                            roll=0
+                        ),
+                        projection_scale=2.2,  # Zooms into the target point
+                        showocean=True,
+                        oceancolor="#e0f2fe",
+                        showland=True,
+                        landcolor="#f1f5f9",
+                        showlakes=True,
+                        lakecolor="#e0f2fe",
+                        showcountries=True,
+                        countrycolor="#cbd5e1",
+                        coastlinecolor="#94a3b8"
+                    )
+                    
+                    fig_globe.update_layout(
+                        template="plotly_white",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        height=480
+                    )
+                    
+                    st.plotly_chart(fig_globe, use_container_width=True)
+                else:
+                    # 3D Subsurface Ocean Cube mode
+                    # Downsample by 4 for highly responsive rotating WebGL performance
+                    ds_factor = 4
+                    ds_lat = target_lat[::ds_factor]
+                    ds_lon = target_lon[::ds_factor]
+                    
+                    cube_depths = [0, 50, 150, 300, 500, 1000]
+                    fig_cube = go.Figure()
+                    
+                    for d in cube_depths:
+                        d_idx = SIH_NUMERIC_DEPTHS.index(d)
+                        # Slices colors from model predicted field
+                        slice_temp = pred_grid[d_idx, ::ds_factor, ::ds_factor]
+                        
+                        # Generate constant Z grid matching downsampled grid shape
+                        z_grid = np.full((len(ds_lat), len(ds_lon)), -d)
+                        
+                        fig_cube.add_trace(go.Surface(
+                            x=ds_lon,
+                            y=ds_lat,
+                            z=z_grid,
+                            surfacecolor=slice_temp,
+                            colorscale="RdYlBu_r",
+                            cmin=4.0,
+                            cmax=32.0,
+                            showscale=True if d == 0 else False,
+                            colorbar=dict(
+                                title="Temp (°C)",
+                                thickness=12,
+                                len=0.5,
+                                y=0.5,
+                                x=0.95
+                            ) if d == 0 else None,
+                            name=f"{d} m Slice",
+                            hovertemplate="Lon: %{x}°E<br>Lat: %{y}°N<br>Depth: " + str(d) + " m<br>Temp: %{surfacecolor:.2f} °C<extra></extra>"
+                        ))
+                    
+                    # Trace 2: Vertical profiling line in 3D Space passing through all 15 depth tiers
+                    fig_cube.add_trace(go.Scatter3d(
+                        x=[selected_lon] * 15,
+                        y=[selected_lat] * 15,
+                        z=[-d for d in SIH_NUMERIC_DEPTHS],
+                        mode="lines+markers",
+                        line=dict(color="#000000", width=4),
+                        marker=dict(
+                            size=6,
+                            color=pred_profile,
+                            colorscale="RdYlBu_r",
+                            cmin=4.0,
+                            cmax=32.0,
+                            line=dict(color="#ffffff", width=1)
+                        ),
+                        hoverinfo="text",
+                        hovertext=[f"Target Profile: {d}m<br>Temp: {t:.3f} °C" for d, t in zip(SIH_NUMERIC_DEPTHS, pred_profile)],
+                        name="Station Profile"
+                    ))
+                    
+                    fig_cube.update_layout(
+                        template="plotly_white",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        scene=dict(
+                            xaxis=dict(title="Longitude (°E)", gridcolor="#cbd5e1", range=[45, 105]),
+                            yaxis=dict(title="Latitude (°N)", gridcolor="#cbd5e1", range=[5, 30]),
+                            zaxis=dict(title="Depth (m)", gridcolor="#cbd5e1", range=[-1000, 10]),
+                            camera=dict(
+                                eye=dict(x=1.6, y=1.6, z=1.3)
+                            ),
+                            annotations=[
+                                dict(
+                                    showarrow=False,
+                                    x=45, y=30, z=-37,
+                                    text="Mixed Layer (0-75m)",
+                                    font=dict(color="#0369a1", size=10, weight="bold")
+                                ),
+                                dict(
+                                    showarrow=False,
+                                    x=45, y=30, z=-185,
+                                    text="Thermocline (75-300m)",
+                                    font=dict(color="#b45309", size=10, weight="bold")
+                                ),
+                                dict(
+                                    showarrow=False,
+                                    x=45, y=30, z=-650,
+                                    text="Deep Ocean (300-1000m)",
+                                    font=dict(color="#334155", size=10, weight="bold")
+                                )
+                            ]
+                        ),
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        height=480
+                    )
+                    
+                    st.plotly_chart(fig_cube, use_container_width=True)
+                
+        with col_telemetry:
+            with st.container(border=True):
+                st.markdown("### Subsurface Thermal Stratification & Profile")
+                
+                # Top metrics row (3 clean pill cards)
+                st.write(
+                    f"""
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px; width: 100%;">
+                        <div class="metric-pill-card" style="flex: 1;">
+                            <div class="metric-pill-title">Surface Temperature</div>
+                            <div class="metric-pill-value">{sst_at_pt:.3f} °C</div>
+                        </div>
+                        <div class="metric-pill-card" style="flex: 1;">
+                            <div class="metric-pill-title">Mixed Layer Depth</div>
+                            <div class="metric-pill-value">{mld_val:.1f} m</div>
+                        </div>
+                        <div class="metric-pill-card" style="flex: 1;">
+                            <div class="metric-pill-title">D20 Isotherm Depth</div>
+                            <div class="metric-pill-value">{d20_val:.1f} m</div>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                
+                # Plotly vertical depth curve with stratification background bands
+                fig_profile = go.Figure()
+                
+                # Background bands
+                fig_profile.add_hrect(
+                    y0=0, y1=75,
+                    fillcolor="rgba(14, 165, 233, 0.06)",
+                    line_width=0,
+                    annotation_text="Mixed Layer (0-75m)",
+                    annotation_position="top left",
+                    annotation_font=dict(color="#0369a1", size=9, weight="bold")
+                )
+                fig_profile.add_hrect(
+                    y0=75, y1=300,
+                    fillcolor="rgba(245, 158, 11, 0.06)",
+                    line_width=0,
+                    annotation_text="Thermocline (75-300m)",
+                    annotation_position="top left",
+                    annotation_font=dict(color="#b45309", size=9, weight="bold")
+                )
+                fig_profile.add_hrect(
+                    y0=300, y1=1000,
+                    fillcolor="rgba(71, 85, 105, 0.06)",
+                    line_width=0,
+                    annotation_text="Deep Ocean (300-1000m)",
+                    annotation_position="top left",
+                    annotation_font=dict(color="#334155", size=9, weight="bold")
+                )
+                
+                # Main profile curve
+                fig_profile.add_trace(go.Scatter(
                     x=pred_profile,
                     y=SIH_NUMERIC_DEPTHS,
                     mode="lines+markers",
+                    line=dict(color="#0284c7", width=3), # Electric ocean blue
+                    marker=dict(size=6, color="#0369a1", line=dict(color="#ffffff", width=1)),
+                    hovertemplate="Depth: %{y} m<br>Temp: %{x:.2f} °C<extra></extra>"
+                ))
+                
+                # D20 dashed line
+                fig_profile.add_hline(
+                    y=d20_val,
+                    line_dash="dash",
+                    line_color="#ef4444", # Coral red
+                    annotation_text=f"D20 isotherm: {d20_val:.1f} m",
+                    annotation_position="bottom right",
+                    annotation_font=dict(color="#ef4444", size=10)
+                )
+                
+                # Configure axis
+                fig_profile.update_yaxes(
+                    autorange="reversed",
+                    range=[1000, -10],
+                    title_text="Depth (meters)",
+                    gridcolor="#f1f5f9",
+                    color="#0f172a"
+                )
+                
+                fig_profile.update_xaxes(
+                    title_text="Temperature (°C)",
+                    gridcolor="#f1f5f9",
+                    color="#0f172a"
+                )
+                
+                fig_profile.update_layout(
+                    template="plotly_white",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="#ffffff",
+                    height=360,
+                    margin=dict(l=40, r=40, t=10, b=40),
+                    showlegend=False,
+                    font=dict(family="Inter, sans-serif")
+                )
+                
+                st.plotly_chart(fig_profile, use_container_width=True)
+                
+                # Native styled dataframe table
+                df_profile_display = pd.DataFrame({
+                    "Depth Level": SIH_STANDARD_DEPTHS,
+                    "Predicted Temp (°C)": [f"{t:.3f} °C" for t in pred_profile],
+                    "Ocean Stratification": layers
+                })
+                
+                st.dataframe(
+                    df_profile_display,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=280
+                )
+                
+                # Export CSV Action
+                df_csv = pd.DataFrame({
+                    "Depth_m": SIH_NUMERIC_DEPTHS,
+                    "Depth_Label": SIH_STANDARD_DEPTHS,
+                    "Predicted_Temp_C": pred_profile,
+                    "Ocean_Layer": layers
+                })
+                csv_data = df_csv.to_csv(index=False).encode('utf-8')
+                
+                st.download_button(
+                    label="Download Depth Profile (CSV)",
+                    data=csv_data,
+                    file_name=f"oceanembed_profile_{selected_lat:.2f}N_{selected_lon:.2f}E_{selected_date_str}.csv",
+                    mime="text/csv",
+                    key="btn_csv_download",
+                    use_container_width=True
+                )
+
+
+# ========================================================
+# TAB 2: Validation & Spatial Maps (Evaluation view)
+# ========================================================
+with tab_validation:
+    st.markdown("### Technical Validation & Spatial Reconstruction Maps")
+    
+    # Cached loading of Argo benchmark matchup metrics
+    @st.cache_data
+    def load_argo_benchmark_metrics():
+        matchup_path = "data/processed/matchup_table.csv"
+        if not os.path.exists(matchup_path):
+            return [], [], []
+        df_match = pd.read_csv(matchup_path)
+        
+        # Feature columns
+        feature_cols = ['lat', 'lon', 'day_of_year', 'sst', 'sss', 'ssh', 'current_u', 'current_v', 'wind_u', 'wind_v']
+        X = df_match[feature_cols].values
+        X_scaled = input_scaler.transform(X)
+        
+        with torch.no_grad():
+            preds_scaled = model(torch.FloatTensor(X_scaled)).numpy()
+        preds = output_scaler.inverse_transform(preds_scaled) # shape: (N, 8)
+        
+        # Ground truths
+        gt_cols = ['temp_0m', 'temp_10m', 'temp_30m', 'temp_50m', 'temp_75m', 'temp_100m', 'temp_200m', 'temp_500m']
+        Y_gt = df_match[gt_cols].values
+        
+        depths_modeled = [0, 10, 30, 50, 75, 100, 200, 500]
+        rmse_arr = []
+        mae_arr = []
+        for i in range(8):
+            diff = preds[:, i] - Y_gt[:, i]
+            rmse_arr.append(float(np.sqrt(np.mean(diff**2))))
+            mae_arr.append(float(np.mean(np.abs(diff))))
+            
+        return depths_modeled, rmse_arr, mae_arr
+
+    m_depths, rmse_vals, mae_vals = load_argo_benchmark_metrics()
+    
+    col_bench, col_map = st.columns([1, 1])
+    
+    with col_bench:
+        with st.container(border=True):
+            st.markdown("### Depth-tier RMSE & MAE Accuracy")
+            
+            if len(m_depths) == 0:
+                st.error("Error: matchup_table.csv file not found. Could not generate benchmark chart.")
+            else:
+                # White-themed Plotly line graph
+                fig_err = go.Figure()
+                
+                fig_err.add_trace(go.Scatter(
+                    x=rmse_vals,
+                    y=m_depths,
+                    mode="lines+markers",
+                    name="RMSE Accuracy (°C)",
                     line=dict(color="#0284c7", width=3),
-                    marker=dict(size=7, color="#005f73"),
-                    hovertemplate="Depth: %{y} m<br>Predicted Temp: %{x:.2f} °C<extra></extra>"
-                ),
-                row=1, col=2
+                    marker=dict(size=7, color="#0369a1"),
+                    hovertemplate="Depth: %{y} m<br>RMSE: %{x:.4f} °C<extra></extra>"
+                ))
+                
+                fig_err.add_trace(go.Scatter(
+                    x=mae_vals,
+                    y=m_depths,
+                    mode="lines+markers",
+                    name="MAE Accuracy (°C)",
+                    line=dict(color="#059669", width=2, dash="dash"),
+                    marker=dict(size=5, color="#059669"),
+                    hovertemplate="Depth: %{y} m<br>MAE: %{x:.4f} °C<extra></extra>"
+                ))
+                
+                fig_err.update_yaxes(
+                    autorange="reversed",
+                    title_text="Depth (meters)",
+                    gridcolor="#f1f5f9",
+                    color="#0f172a"
+                )
+                fig_err.update_xaxes(
+                    title_text="Reconstruction Error (°C)",
+                    gridcolor="#f1f5f9",
+                    color="#0f172a"
+                )
+                
+                fig_err.update_layout(
+                    template="plotly_white",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="#ffffff",
+                    height=450,
+                    margin=dict(l=40, r=40, t=10, b=40),
+                    legend=dict(x=0.6, y=0.15, bgcolor="rgba(255,255,255,0.9)", bordercolor="#cbd5e1", borderwidth=1)
+                )
+                st.plotly_chart(fig_err, use_container_width=True)
+            
+    with col_map:
+        with st.container(border=True):
+            st.markdown("### Horizontal Spatial Slice Map")
+            
+            # User selected depth slice
+            selected_slice_depth = st.selectbox(
+                "Select Depth Slice for 2D Map",
+                options=SIH_NUMERIC_DEPTHS,
+                format_func=lambda x: f"{x} m" if x > 0 else "0 m (Surface)",
+                key="selectbox_map_depth"
             )
             
-            # Add Horizontal Zone Callout Lines & Labels on Heatmap Ribbon
-            fig.add_hline(y=75, line_dash="dash", line_color="rgba(148, 163, 184, 0.45)", row=1, col=1)
-            fig.add_hline(y=300, line_dash="dash", line_color="rgba(148, 163, 184, 0.45)", row=1, col=1)
+            depth_slice_idx = SIH_NUMERIC_DEPTHS.index(selected_slice_depth)
+            slice_grid = pred_grid[depth_slice_idx]
             
-            # Layer annotations for Heatmap (col 1)
-            fig.add_annotation(
-                x=0, y=37.5, text="Mixed Layer",
-                showarrow=False, font=dict(size=9, color="#0f172a", weight="bold"),
-                xref="x1", yref="y1"
-            )
-            fig.add_annotation(
-                x=0, y=187.5, text="Thermocline",
-                showarrow=False, font=dict(size=9, color="#0f172a", weight="bold"),
-                xref="x1", yref="y1"
-            )
-            fig.add_annotation(
-                x=0, y=650, text="Deep Ocean",
-                showarrow=False, font=dict(size=9, color="#ffffff", weight="bold"),
-                xref="x1", yref="y1"
-            )
-
-            # Dashed Reference Line for D20 on Scatter Curve (col 2)
-            fig.add_hline(y=d20_depth, line_dash="dash", line_color="#db2777", row=1, col=2,
-                          annotation_text=f"D20 ({d20_depth:.1f}m)", annotation_position="bottom right")
-
-            # Axis & Layout Formatting
-            fig.update_yaxes(
-                autorange="reversed",
-                range=[1000, -10],
-                title_text="Depth (meters)",
-                tickfont=dict(color="#475569"),
-                showgrid=False,
-                row=1, col=1
-            )
-            fig.update_xaxes(showgrid=False, showticklabels=False, row=1, col=1)
+            # Spatial Heatmap (continent mask shown as light slate/gray)
+            fig_map = go.Figure(data=go.Heatmap(
+                x=target_lon,
+                y=target_lat,
+                z=slice_grid,
+                colorscale="RdYlBu",
+                reversescale=True,
+                colorbar=dict(title="Temp (°C)"),
+                hovertemplate="Lon: %{x}°E<br>Lat: %{y}°N<br>Temp: %{z:.2f}°C<extra></extra>"
+            ))
             
-            fig.update_yaxes(
-                autorange="reversed",
-                range=[1000, -10],
-                showgrid=True,
-                gridcolor="#f1f5f9",
-                row=1, col=2
-            )
-            fig.update_xaxes(
-                title_text="Temperature (°C)",
-                showgrid=True,
-                gridcolor="#f1f5f9",
-                tickfont=dict(color="#475569"),
-                row=1, col=2
-            )
-            
-            fig.update_layout(
-                height=620,
-                margin=dict(l=40, r=40, t=30, b=30),
-                plot_bgcolor="rgba(0,0,0,0)",
+            fig_map.update_layout(
+                template="plotly_white",
                 paper_bgcolor="rgba(0,0,0,0)",
-                showlegend=False,
-                font=dict(family="Inter, sans-serif")
+                plot_bgcolor="#cbd5e1", # land color in light slate
+                xaxis=dict(title="Longitude (°E)", gridcolor="#f1f5f9"),
+                yaxis=dict(title="Latitude (°N)", gridcolor="#f1f5f9", scaleanchor="x"),
+                height=400,
+                margin=dict(l=20, r=20, t=10, b=20)
             )
-            
-            st.plotly_chart(fig, use_container_width=True)
-
-
-# --- Tab 2: Validation and Spatial Maps (Secondary View) ---
-with tab_verification:
-    if ocean_mask[lat_idx, lon_idx] == 1:
-        # Reconstruct ground truth profile
-        gt_profile = gt_grid[:, lat_idx, lon_idx]
-        
-        # Mixed Layer Depth (MLD)
-        surface_t = pred_profile[0]
-        mld_idxs = np.where(pred_profile <= (surface_t - 0.5))[0]
-        mld_depth = SIH_NUMERIC_DEPTHS[mld_idxs[0]] if len(mld_idxs) > 0 else 40.0
-        
-        # Thermocline Depth (D20)
-        try:
-            sort_idx = np.argsort(pred_profile)
-            d20_depth = float(np.interp(20.0, pred_profile[sort_idx], np.array(SIH_NUMERIC_DEPTHS)[sort_idx]))
-            if d20_depth < 0 or d20_depth > 1000:
-                d20_depth = 120.0
-        except:
-            d20_depth = 120.0
-            
-        thermocline_temp = float(np.interp(d20_depth, SIH_NUMERIC_DEPTHS, pred_profile))
-        
-        # Error metrics
-        rmse_pt = np.sqrt(np.mean((gt_profile - pred_profile)**2))
-        pearson_r = np.corrcoef(gt_profile, pred_profile)[0, 1]
-
-        st.markdown("### Technical Verification & Skill Metrics")
-        
-        # Metrics Row
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.markdown(
-                f"""
-                <div class="dashboard-card">
-                    <div class="card-title">Profile RMSE (All Depths)</div>
-                    <div class="card-value">{rmse_pt:.4f} °C</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        with col2:
-            st.markdown(
-                f"""
-                <div class="dashboard-card">
-                    <div class="card-title">Pearson Correlation (R)</div>
-                    <div class="card-value">{pearson_r:.4f}</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        with col3:
-            st.markdown(
-                f"""
-                <div class="dashboard-card">
-                    <div class="card-title">Mixed Layer Depth</div>
-                    <div class="card-value">{mld_depth:.1f} m</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        with col4:
-            st.markdown(
-                f"""
-                <div class="dashboard-card">
-                    <div class="card-title">Thermocline D20 Depth</div>
-                    <div class="card-value">{d20_depth:.1f} m</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-        # Sync Plot: Model Predictions vs Ground Truth (GLORYS)
-        st.markdown("#### Subsurface Temperature Verification Profile")
-        fig, ax = plt.subplots(figsize=(8, 5))
-        fig.patch.set_facecolor('#ffffff')
-        ax.set_facecolor('#f8fafc')
-        
-        ax.plot(pred_profile, SIH_NUMERIC_DEPTHS, marker='o', color='#0284c7', linewidth=2.5, label='Reconstruction (OceanEmbed)')
-        ax.plot(gt_profile, SIH_NUMERIC_DEPTHS, marker='s', color='#e11d48', linewidth=1.8, linestyle='--', label='Ground Truth (GLORYS)')
-        ax.fill_betweenx(SIH_NUMERIC_DEPTHS, pred_profile, gt_profile, color='#0284c7', alpha=0.12, label='Prediction Deviation')
-        
-        ax.axhline(y=mld_depth, color='#d97706', linestyle=':', linewidth=1.5, label=f'Mixed Layer Depth ({mld_depth:.1f}m)')
-        ax.axhline(y=d20_depth, color='#db2777', linestyle='-.', linewidth=1.5, label=f'Thermocline D20 ({d20_depth:.1f}m)')
-        
-        ax.set_xlabel("Temperature (°C)", fontsize=11, fontweight="semibold", color="#0f172a")
-        ax.set_ylabel("Depth (meters)", fontsize=11, fontweight="semibold", color="#0f172a")
-        ax.invert_yaxis()
-        ax.set_ylim(1000, 0)
-        ax.grid(True, which="both", color="#e2e8f0", linestyle=":", linewidth=0.8)
-        for spine in ax.spines.values():
-            spine.set_color("#cbd5e1")
-        ax.legend(facecolor="#ffffff", edgecolor="#cbd5e1", fontsize=9)
-        
-        st.pyplot(fig)
-
-    # Spatial 2D Maps Section
-    st.markdown("---")
-    st.markdown("### Spatial Map Validation")
-    
-    surface_channels = {
-        "Sea Surface Temperature (SST)": (sst_grid, "coolwarm", "°C"),
-        "Sea Surface Salinity (SSS)": (sss_grid, "viridis", "PSU"),
-        "Sea Surface Height (SSH)": (ssh_grid, "Spectral_r", "meters"),
-        "Surface Current Speed": (current_speed, "magma", "m/s"),
-        "Surface Wind Speed": (wind_speed, "plasma", "m/s")
-    }
-    
-    selected_channel = st.selectbox(
-        "Select Surface Observation Channel (Left Spatial Map)",
-        options=list(surface_channels.keys())
-    )
-    left_grid, cmap_left_name, left_unit = surface_channels[selected_channel]
-    
-    selected_verif_depth = st.selectbox(
-        "Select Depth for Reconstructed Temperature Map (Right Spatial Map)",
-        options=SIH_NUMERIC_DEPTHS,
-        format_func=lambda x: f"{x} m" if x > 0 else "0 m (Surface)",
-        key="verif_depth_select"
-    )
-    verif_depth_idx = SIH_NUMERIC_DEPTHS.index(selected_verif_depth)
-
-    # Plot spatial maps side-by-side
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-    fig.patch.set_facecolor('#ffffff')
-    ax1.set_facecolor('#f8fafc')
-    ax2.set_facecolor('#f8fafc')
-    
-    cmap_left = copy.copy(plt.colormaps[cmap_left_name])
-    cmap_left.set_bad(color="#e2e8f0")
-    mesh1 = ax1.pcolormesh(target_lon, target_lat, left_grid, cmap=cmap_left, shading="auto")
-    plt.colorbar(mesh1, ax=ax1, fraction=0.046, pad=0.04).set_label(f"{selected_channel} ({left_unit})", color="#0f172a")
-    ax1.set_title(f"Surface Observation: {selected_channel}", fontsize=12, fontweight="bold", color="#0f172a")
-    
-    pred_layer = pred_grid[verif_depth_idx]
-    cmap_right = copy.copy(plt.colormaps["inferno"])
-    cmap_right.set_bad(color="#e2e8f0")
-    mesh2 = ax2.pcolormesh(target_lon, target_lat, pred_layer, cmap=cmap_right, shading="auto")
-    plt.colorbar(mesh2, ax=ax2, fraction=0.046, pad=0.04).set_label("Reconstructed Temperature (°C)", color="#0f172a")
-    selected_verif_label = SIH_STANDARD_DEPTHS[verif_depth_idx]
-    ax2.set_title(f"Model Reconstruction: Subsurface Temp at {selected_verif_label}", fontsize=12, fontweight="bold", color="#0f172a")
-    
-    for ax in [ax1, ax2]:
-        ax.set_xlabel("Longitude (°E)", fontsize=9, color="#0f172a")
-        ax.set_ylabel("Latitude (°N)", fontsize=9, color="#0f172a")
-        ax.tick_params(colors="#0f172a", labelsize=8)
-        ax.grid(True, which="both", color="#e2e8f0", linestyle=":", linewidth=0.5)
-        for spine in ax.spines.values():
-            spine.set_color("#cbd5e1")
-            
-    plt.tight_layout()
-    st.pyplot(fig)
-
-    # Domain Stats
-    mean_temp = np.nanmean(pred_layer)
-    spatial_var = np.nanvar(pred_layer)
-    mean_val_grid = np.nanmean(pred_layer)
-    max_anomaly = np.nanmax(np.abs(pred_layer - mean_val_grid))
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"<div class='dashboard-card'><div class='card-title'>Domain Mean Temp</div><div class='card-value'>{mean_temp:.3f} °C</div></div>", unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"<div class='dashboard-card'><div class='card-title'>Spatial Variance</div><div class='card-value'>{spatial_var:.4f} °C²</div></div>", unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"<div class='dashboard-card'><div class='card-title'>Max Eddy Anomaly</div><div class='card-value'>{max_anomaly:.3f} °C</div></div>", unsafe_allow_html=True)
-
-    # Depth-wise Benchmark Plot & Table
-    st.markdown("---")
-    st.markdown("### Depth-wise Error Analysis & CSV Export")
-    
-    rmse_per_depth = []
-    mae_per_depth = []
-    mean_gt_temp = []
-    mean_pred_temp = []
-    for d_idx in range(15):
-        gt_layer = gt_grid[d_idx]
-        pred_layer = pred_grid[d_idx]
-        diff = gt_layer[ocean_mask == 1] - pred_layer[ocean_mask == 1]
-        rmse_per_depth.append(np.sqrt(np.mean(diff**2)))
-        mae_per_depth.append(np.mean(np.abs(diff)))
-        mean_gt_temp.append(np.nanmean(gt_layer))
-        mean_pred_temp.append(np.nanmean(pred_layer))
-        
-    col_bench_plot, col_bench_table = st.columns([1, 1])
-    
-    with col_bench_plot:
-        fig, ax = plt.subplots(figsize=(6.5, 7.5))
-        fig.patch.set_facecolor('#ffffff')
-        ax.set_facecolor('#f8fafc')
-        
-        ax.plot(rmse_per_depth, SIH_NUMERIC_DEPTHS, marker='o', color='#2563eb', linewidth=2.5, label='RMSE (°C)')
-        ax.plot(mae_per_depth, SIH_NUMERIC_DEPTHS, marker='x', color='#059669', linewidth=1.8, linestyle='-.', label='MAE (°C)')
-        
-        ax.set_xlabel("Reconstruction Accuracy Error (°C)", fontsize=11, fontweight="semibold", color="#0f172a")
-        ax.set_ylabel("Depth (meters)", fontsize=11, fontweight="semibold", color="#0f172a")
-        ax.set_title("Reconstruction Error vs Depth Tier", fontsize=12, fontweight="bold", color="#0f172a", pad=15)
-        ax.invert_yaxis()
-        ax.set_ylim(1000, 0)
-        
-        ax.tick_params(colors="#0f172a", labelsize=9)
-        ax.grid(True, which="both", color="#e2e8f0", linestyle=":", linewidth=0.8)
-        for spine in ax.spines.values():
-            spine.set_color("#cbd5e1")
-        ax.legend(facecolor="#ffffff", edgecolor="#cbd5e1", fontsize=9)
-        plt.tight_layout()
-        st.pyplot(fig)
-        
-    with col_bench_table:
-        st.markdown("#### Accuracy Summary Table")
-        
-        accuracy_data = []
-        for i in range(15):
-            accuracy_data.append({
-                "Depth Tier": SIH_STANDARD_DEPTHS[i],
-                "Mean Ground Truth (°C)": f"{mean_gt_temp[i]:.3f}",
-                "Mean Predicted (°C)": f"{mean_pred_temp[i]:.3f}",
-                "RMSE (°C)": f"{rmse_per_depth[i]:.4f}",
-                "MAE (°C)": f"{mae_per_depth[i]:.4f}"
-            })
-        df_bench = pd.DataFrame(accuracy_data)
-        st.dataframe(df_bench, use_container_width=True, hide_index=True, height=420)
-        
-        st.markdown("#### Export 3D Spatial Predictions")
-        st.write("Export coordinates, predicted temperatures, and ground truth temperatures as a clean flat CSV.")
-        
-        # Flattened grid export generation
-        export_rows = []
-        for d_idx in range(15):
-            depth_val = SIH_NUMERIC_DEPTHS[d_idx]
-            p_layer = pred_grid[d_idx]
-            g_layer = gt_grid[d_idx]
-            for lat_i in range(101):
-                for lon_i in range(241):
-                    if ocean_mask[lat_i, lon_i] == 1:
-                        export_rows.append({
-                            "Latitude": target_lat[lat_i],
-                            "Longitude": target_lon[lon_i],
-                            "Depth_m": depth_val,
-                            "Predicted_Temp_C": p_layer[lat_i, lon_i],
-                            "Ground_Truth_Temp_C": g_layer[lat_i, lon_i]
-                        })
-                        
-        df_export = pd.DataFrame(export_rows)
-        csv_data = df_export.to_csv(index=False)
-        st.download_button(
-            label="Export 3D Reconstructed Field (CSV)",
-            data=csv_data,
-            file_name=f"oceanembed_3d_reconstruction_{selected_date_str}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+            st.plotly_chart(fig_map, use_container_width=True)
