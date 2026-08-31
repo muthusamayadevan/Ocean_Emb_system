@@ -27,7 +27,7 @@ from src.model import OceanEncoderDecoder
 # 1. Page Configuration & Custom CSS Injection (Copernicus Light Theme)
 # --------------------------------------------------------
 st.set_page_config(
-    page_title="OceanEmbed | Copernicus Subsurface Portal",
+    page_title="AGASTYA - 3D Subsurface Ocean Intelligence Portal",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -355,8 +355,8 @@ def calculate_d20(depths, temps):
 # --------------------------------------------------------
 # 4. Top Government Header & Status Bar
 # --------------------------------------------------------
-st.markdown("## OceanEmbed: 3D Subsurface Ocean Temperature Reconstruction")
-st.markdown("<p class='portal-subtitle'>Copernicus / INCOIS Physical Intelligence Portal | Domain: 5°N–30°N, 45°E–105°E</p>", unsafe_allow_html=True)
+st.markdown("# AGASTYA: 3D Subsurface Ocean Temperature Reconstruction System")
+st.markdown("<p class='portal-subtitle'>Autonomous Geospatial & Subsurface Thermal Analytics (MoES / INCOIS Domain)</p>", unsafe_allow_html=True)
 
 # Metadata badges
 st.markdown(
@@ -804,7 +804,7 @@ with tab_reconstruction:
                 st.download_button(
                     label="Download Depth Profile (CSV)",
                     data=csv_data,
-                    file_name=f"oceanembed_profile_{selected_lat:.2f}N_{selected_lon:.2f}E_{selected_date_str}.csv",
+                    file_name=f"AGASTYA_subsurface_profile_{selected_lat:.2f}N_{selected_lon:.2f}E_{selected_date_str}.csv",
                     mime="text/csv",
                     key="btn_csv_download",
                     use_container_width=True
