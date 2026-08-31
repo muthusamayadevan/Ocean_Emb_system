@@ -541,14 +541,23 @@ with tab_reconstruction:
                         hoverinfo="text"
                     ))
                     
+                    # Calculate a focused regional bounding box (+/- 10 degrees around selected point)
+                    lat_min = max(0.0, float(selected_lat) - 10.0)
+                    lat_max = min(40.0, float(selected_lat) + 10.0)
+                    lon_min = max(35.0, float(selected_lon) - 15.0)
+                    lon_max = min(115.0, float(selected_lon) + 15.0)
+
                     fig_globe.update_geos(
                         projection_type="orthographic",
                         projection_rotation=dict(
-                            lat=selected_lat,
-                            lon=selected_lon,
+                            lat=float(selected_lat),
+                            lon=float(selected_lon),
                             roll=0
                         ),
-                        projection_scale=2.2,  # Zooms into the target point
+                        projection_scale=2.8,  # Increased zoom factor
+                        center=dict(lat=float(selected_lat), lon=float(selected_lon)),
+                        lataxis_range=[lat_min, lat_max],
+                        lonaxis_range=[lon_min, lon_max],
                         showocean=True,
                         oceancolor="#e0f2fe",
                         showland=True,
@@ -557,13 +566,18 @@ with tab_reconstruction:
                         lakecolor="#e0f2fe",
                         showcountries=True,
                         countrycolor="#cbd5e1",
-                        coastlinecolor="#94a3b8"
+                        coastlinecolor="#94a3b8",
+                        lataxis_showgrid=True,
+                        lonaxis_showgrid=True,
+                        lataxis_gridcolor="#cbd5e1",
+                        lonaxis_gridcolor="#cbd5e1"
                     )
                     
                     fig_globe.update_layout(
                         template="plotly_white",
                         paper_bgcolor="rgba(0,0,0,0)",
-                        margin=dict(l=10, r=10, t=10, b=10),
+                        uirevision=f"{selected_lat}_{selected_lon}_{selected_date_str}",
+                        margin=dict(l=0, r=0, t=10, b=10),
                         height=480
                     )
                     
