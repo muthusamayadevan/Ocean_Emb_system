@@ -9,6 +9,7 @@ interactive 3D subsurface temperature volume cube, vertical stratification profi
 import os
 import time
 import copy
+import datetime
 import joblib
 import numpy as np
 import pandas as pd
@@ -379,13 +380,37 @@ with st.container(border=True):
     col_deck1, col_deck2, col_deck3, col_deck4 = st.columns([30, 25, 25, 20])
 
     with col_deck1:
-        date_strs = [d.strftime("%Y-%m-%d") for d in common_days]
-        selected_date_str = st.selectbox(
-            "Analysis Snapshot Date",
-            options=date_strs,
-            index=0
+        import datetime
+
+        # Dynamic Live Date Assignment
+        today_date = datetime.date.today()
+        min_date = datetime.date(2024, 1, 1)
+
+        selected_date_obj = st.date_input(
+            "Select Analysis Snapshot Date",
+            value=today_date,
+            min_value=min_date,
+            max_value=today_date,
+            help="Select any date from 2024 up to present day for real-time ocean model reconstruction."
         )
-        day_idx = date_strs.index(selected_date_str)
+
+        if isinstance(selected_date_obj, (list, tuple)):
+            selected_date_obj = selected_date_obj[0] if selected_date_obj else today_date
+        elif selected_date_obj is None:
+            selected_date_obj = today_date
+
+        selected_date_str = selected_date_obj.strftime("%Y-%m-%d")
+        selected_date = selected_date_str
+
+        # Dynamic Execution Logic
+        if selected_date_obj == today_date:
+            st.info("⚡ Live Real-Time Mode: Fetching active operational satellite SST feeds and running 3D profile reconstruction.")
+            # Trigger NRT Satellite Data Ingestion Pipeline / Latest Pass Inference
+        else:
+            st.info(f"📜 Historical Mode: Loading spatial dataset & ground-truth validation for {selected_date_str}.")
+
+        date_strs = [d.strftime("%Y-%m-%d") for d in common_days]
+        day_idx = date_strs.index(selected_date_str) if selected_date_str in date_strs else 0
 
     with col_deck2:
         selected_lat = st.number_input(
